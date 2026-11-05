@@ -1,0 +1,59 @@
+from typing import Any
+
+import numpy as np
+import torch
+from conftest import TINY
+from PIL import Image
+
+from config import DatasetName, ModelType, RunConfig, Stage
+from data import CIFAR10DataModule
+from model import DiTDBlockModel
+
+
+def make_model(**overrides: Any) -> DiTDBlockModel:
+    cfg = RunConfig(
+        Stage.TRAIN,
+        DatasetName.CIFAR10,
+        ModelType.DIT,
+        image_size=8,
+        num_labels=10,
+        num_inference_steps=6,
+        **overrides,
+    )
+    model = DiTDBlockModel(cfg, TINY)
+    model.configure_model()
+    return model
+
+
+def test_training_step_updates_only_the_sampled_block() -> None:
+    model = make_model()
+    batch = {"pixel_values": torch.randn(4, 3, 8, 8), "labels": torch.arange(4)}
+    loss, logs = model.shared_step(batch)
+    loss.backward()
+    (block_key,) = [k for k in logs if k.startswith("train/loss_")]
+    block = int(block_key[-1])
+    grads = [
+        any(p.grad is not None for p in m.parameters()) for m in model.model.layers
+    ]
+    assert torch.isfinite(loss) and grads == [i == block for i in range(3)]
+    assert model.num_blocks == 3  # max_epochs multiplier
+
+
+def test_sample_is_deterministic_and_cfg_zero_is_conditional() -> None:
+    model = make_model(cfg_scale=2.0).eval()
+    labels = torch.arange(3)
+    a = model.sample(labels, torch.Generator().manual_seed(0))
+    b = model.sample(labels, torch.Generator().manual_seed(0))
+    assert a.shape == (3, 3, 8, 8) and torch.equal(a, b)
+    z, sigma = torch.randn(3, 3, 8, 8), torch.full((3,), 1.0)
+    model.cfg_scale = 0.0
+    no_cfg = model.denoise(z, sigma, labels)
+    model.train()
+    torch.testing.assert_close(no_cfg, model.denoise(z, sigma, labels))
+
+
+def test_cifar10_transform_is_flip_only_in_minus_one_one() -> None:
+    img = Image.fromarray(np.full((32, 32, 3), 255, dtype=np.uint8))
+    out = CIFAR10DataModule(num_workers=0).train_transforms(img)
+    assert isinstance(out, torch.Tensor)
+    assert out.shape == (3, 32, 32) and torch.all(out == 1.0)

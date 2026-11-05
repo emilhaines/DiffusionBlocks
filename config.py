@@ -15,6 +15,7 @@ class Stage(StrEnum):
 
 
 class DatasetName(StrEnum):
+    CIFAR10 = "cifar10"
     CIFAR100 = "cifar100"
     TINY_IMAGENET = "tiny-imagenet"
 
@@ -22,6 +23,7 @@ class DatasetName(StrEnum):
 class ModelType(StrEnum):
     VIT = "vit"
     DBLOCK = "dblock"
+    DIT = "dit"
 
 
 @dataclass(frozen=True)

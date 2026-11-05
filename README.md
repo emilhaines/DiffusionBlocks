@@ -95,6 +95,44 @@ CKPT_PATH="logs/path-to-last.ckpt"
 uv run main.py test cifar100 --model_type dblock --ckpt_path $CKPT
 ```
 
+## Generation (CIFAR-10, DiT-S/2)
+
+Class-conditional image generation with a DiT-S/2 (12 layers, 384 hidden, 6 heads, patch 2) on CIFAR-10
+pixels, trained with EDM. `--num_blocks 1` is the end-to-end baseline and `--num_blocks 3` is
+DiffusionBlocks; both use the same code path. As for classification, DiffusionBlocks runs
+`num_epochs × num_blocks` epochs so that each block gets as many updates as the baseline.
+
+**Baseline (DiT, B=1):**
+
+```bash
+uv run main.py train cifar10 --model_type dit --num_blocks 1 \
+    --batch_size 64 --accumulate_grad_batches 8 --lr 1e-4 --num_epochs 100 \
+    --cfg_scale 2.0 --class_dropout_prob 0.1 --num_inference_steps 50
+```
+
+**DiffusionBlocks (B=3):**
+
+```bash
+uv run main.py train cifar10 --model_type dit --num_blocks 3 --gamma 0.05 \
+    --batch_size 64 --accumulate_grad_batches 8 --lr 1e-4 --num_epochs 100 \
+    --cfg_scale 2.0 --class_dropout_prob 0.1 --num_inference_steps 50
+```
+
+The settings follow the paper (App. E.2): batch 512 (here 64 × 8 accumulation; a micro-batch of 128 does not fit B=1 on a 19 GB Mac), AdamW with lr 1e-4,
+100 epochs, CFG scale 2.0 with 10% label dropout, and 50 Euler steps. Sampling uses
+`DiTDBlockModel.sample(labels)`.
+
+## Development
+
+```bash
+uv run pytest             # unit tests (CPU, a few seconds)
+uv run pyright            # type check
+uv run ruff check .       # lint
+uv run ruff format .      # format
+```
+
+The same checks run in CI (`.github/workflows/validate.yml`).
+
 ## Acknowledgement
 
 The implementation of Vision Transformer in [vit.py](./vit.py) is based on [HuggingFace Transformers](https://github.com/huggingface/transformers). And, the implementation of EDM is based on [Stability-AI/generative-models](https://github.com/Stability-AI/generative-models).  
