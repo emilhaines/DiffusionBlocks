@@ -62,12 +62,12 @@ class ImageDataModule(L.LightningDataModule):
             T.Resize(self.image_size),
             T.CenterCrop(self.image_size),
         ]
-        post_transforms = [
+        self.post_transforms = [
             T.ToTensor(),
             T.Normalize(mean=self.mean, std=self.std),
         ]
-        self.train_transforms = T.Compose(train_transforms + post_transforms)
-        self.val_transforms = T.Compose(val_transformers + post_transforms)
+        self.train_transforms = T.Compose(train_transforms + self.post_transforms)
+        self.val_transforms = T.Compose(val_transformers + self.post_transforms)
         self.datasets: dict[str, Any] = {}
         self.train_key: str = "train"
         self.val_key: str | None = "validation"
@@ -129,6 +129,26 @@ class ImageDataModule(L.LightningDataModule):
             drop_last=True,
             shuffle=False,
         )
+
+
+class CIFAR10DataModule(ImageDataModule):
+    """For generation: pixels scaled to [-1, 1] (EDM's sigma_data = 0.5) with
+    horizontal flips only. Random crops would teach the model padded borders (D20)."""
+
+    data_name = "uoft-cs/cifar10"
+    image_size = 32
+    num_labels = 10
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.val_key = None
+        self.train_transforms = T.Compose(
+            [T.Lambda(to_rgb), T.RandomHorizontalFlip(), *self.post_transforms]
+        )
+        self.val_transforms = T.Compose([T.Lambda(to_rgb), *self.post_transforms])
+
+    def setup_dataset(self, data: DatasetDict) -> DatasetDict:
+        return data.rename_columns({"img": "image"})
 
 
 class CIFAR100DataModule(ImageDataModule):
@@ -203,6 +223,7 @@ class TinyImageNetDataModule(ImageDataModule):
 
 
 DATA_MODULES: dict[DatasetName, type[ImageDataModule]] = {
+    DatasetName.CIFAR10: CIFAR10DataModule,
     DatasetName.CIFAR100: CIFAR100DataModule,
     DatasetName.TINY_IMAGENET: TinyImageNetDataModule,
 }
