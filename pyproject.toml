@@ -14,7 +14,6 @@ dependencies = [
     "huggingface-hub[hf-xet]>=0.31.2",
     "hf-transfer>=0.1.9",
     "scipy>=1.16.2",
-    "flash-attn==2.7.4.post1",
 ]
 
 
@@ -30,3 +29,26 @@ torch = [
 torchvision = [
     { index = "pytorch-cu124", marker = "sys_platform == 'linux'"}
 ]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.pyright]
+include = ["main.py", "config.py", "model.py", "data.py", "dblock_modules.py", "dit.py", "vit.py", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
+
+[tool.ruff]
+line-length = 88  # the repo's existing (black) style
+extend-exclude = ["docs"]
