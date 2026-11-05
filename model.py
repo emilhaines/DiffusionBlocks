@@ -372,10 +372,6 @@ class DiTDBlockModel(DBlockModule):
         self.log_dict(loss_dict, batch_size=batch["labels"].shape[0], prog_bar=True)
         return loss
 
-    def test_step(self, batch: Batch, batch_idx: int) -> None:
-        _, loss_dict = self.shared_step(batch, Split.TEST)
-        self.log_dict(loss_dict, batch_size=batch["labels"].shape[0])
-
     @torch.no_grad()
     def sample(
         self, labels: torch.Tensor, generator: torch.Generator | None = None

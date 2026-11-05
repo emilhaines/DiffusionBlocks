@@ -141,7 +141,10 @@ class CIFAR10DataModule(ImageDataModule):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+        # like CIFAR-100, no validation split; the test stage (sample grid, FID) is
+        # not implemented yet, so main.py skips it
         self.val_key = None
+        self.test_key = None
         self.train_transforms = T.Compose(
             [T.Lambda(to_rgb), T.RandomHorizontalFlip(), *self.post_transforms]
         )
