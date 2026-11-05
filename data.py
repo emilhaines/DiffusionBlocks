@@ -133,7 +133,7 @@ class ImageDataModule(L.LightningDataModule):
 
 class CIFAR10DataModule(ImageDataModule):
     """For generation: pixels scaled to [-1, 1] (EDM's sigma_data = 0.5) with
-    horizontal flips only. Random crops would teach the model padded borders (D20)."""
+    horizontal flips only. Random crops would teach the model padded borders."""
 
     data_name = "uoft-cs/cifar10"
     image_size = 32

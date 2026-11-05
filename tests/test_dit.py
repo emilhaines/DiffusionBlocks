@@ -41,7 +41,7 @@ def test_pos_embed_is_unique_per_patch() -> None:
 
 
 def test_euler_sampler_recovers_two_point_data() -> None:
-    """Exact denoiser for data ±1 (maths primer P5): D(z; σ) = tanh(z/σ²)."""
+    """Exact denoiser for data ±1: D(z; σ) = tanh(z/σ²)."""
     sigmas = BlockPartition(3).get_discrete_sigmas(50)
     z = torch.randn(2000, 1) * (1 + sigmas[0] ** 2).sqrt()
     out = euler_sample(lambda z, s, _: torch.tanh(z / s[:, None] ** 2), sigmas, z)

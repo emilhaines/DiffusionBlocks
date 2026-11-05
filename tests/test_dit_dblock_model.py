@@ -36,7 +36,7 @@ def test_training_step_updates_only_the_sampled_block() -> None:
         any(p.grad is not None for p in m.parameters()) for m in model.model.layers
     ]
     assert torch.isfinite(loss) and grads == [i == block for i in range(3)]
-    assert model.num_blocks == 3  # max_epochs multiplier (D6)
+    assert model.num_blocks == 3  # max_epochs multiplier
 
 
 def test_sample_is_deterministic_and_cfg_zero_is_conditional() -> None:

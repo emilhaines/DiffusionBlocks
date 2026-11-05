@@ -49,7 +49,7 @@ class TimestepEmbedder(nn.Module):
 
 
 class AdaLN(nn.Module):
-    """The repo's AdaLN: SiLU(Linear(c)). DiT's own form is Linear(SiLU(c)) (design doc §5.1, O12)."""
+    """The repo's AdaLN: SiLU(Linear(c)). DiT's own form is Linear(SiLU(c))."""
 
     def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
         super().__init__()
@@ -60,7 +60,7 @@ class AdaLN(nn.Module):
         return self.silu(self.linear(x))
 
 
-# --- DiT-S/2 for pixel-space generation (design doc §1, §4) ---
+# --- DiT-S/2 for pixel-space generation ---
 
 
 @dataclass(frozen=True)

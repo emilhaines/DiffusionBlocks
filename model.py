@@ -294,7 +294,7 @@ class ViTDBlockModel(DBlockModule, ViTModel):
             probs = F.softmax(self.denoise(x, z, sigma), dim=1)
             denoised = F.linear(
                 probs, self.label_embedding_weight().t()
-            )  # raw (un-normalized) weights, D13
+            )  # raw (un-normalized) weights, as in the original
             d = (z - denoised) / sigma[:, None]
             z = z + (next_sigma - sigma)[:, None] * d
         sigmas = torch.full((x.shape[0],), self.sigmas[-1].item(), device=self.device)
@@ -384,7 +384,7 @@ class DiTDBlockModel(DBlockModule):
         c = self.dit_config
         shape = (labels.shape[0], c.in_channels, c.image_size, c.image_size)
         z = torch.randn(shape, generator=generator).to(self.device)
-        z = z * torch.sqrt(1.0 + self.sigmas[0] ** 2)  # repo initialization (O2)
+        z = z * torch.sqrt(1.0 + self.sigmas[0] ** 2)  # as in the repo
         # the schedule is fixed, so look up each step's block once (no per-step sync)
         block_idxs = self.partition.get_block_idx(self.sigmas.cpu()).tolist()
         return euler_sample(
