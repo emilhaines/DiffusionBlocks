@@ -1,13 +1,14 @@
-import os
-import argparse
 import datetime
-import json
-import torch
-import lightning as L
-from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
-from lightning.pytorch.strategies import DDPStrategy, DeepSpeedStrategy
+import os
+from dataclasses import replace
 
+import lightning as L
+import torch
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.strategies import DDPStrategy
+
+from config import RunConfig, Stage, parse_args
 from data import load_data
 from model import load_model
 
@@ -16,12 +17,11 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-def main(args):
+def main(args: RunConfig) -> None:
     L.seed_everything(args.seed)
 
     data = load_data(args)
-    args.image_size = data.image_size
-    args.num_labels = data.num_labels
+    args = replace(args, image_size=data.image_size, num_labels=data.num_labels)
     model = load_model(args)
     if args.ckpt_path is not None:
         nowname = os.path.basename(os.path.dirname(args.ckpt_path))
@@ -30,8 +30,7 @@ def main(args):
             tz=datetime.timezone(datetime.timedelta(hours=9), name="JST")
         ).strftime("%Y-%m-%dT%H-%M-%S")
         nowname = now + f"-{args.model_type}" + args.postfix
-        if nowname.startswith("_"):
-            nowname = nowname[1:]
+        nowname = nowname.removeprefix("_")
     print("Experiment Name:", nowname)
     logdir = os.path.join("logs", nowname)
     logger = WandbLogger(
@@ -43,10 +42,8 @@ def main(args):
         # group=f"{args.data_name}",
     )
     trainer = L.Trainer(
-        max_epochs=args.num_epochs
-        if args.model_type != "dblock"
-        else args.num_epochs
-        * args.num_blocks,  # to align total number of iterations across the entire network because one step corresponds to one block
+        # to align total number of iterations across the entire network because one step corresponds to one block
+        max_epochs=args.num_epochs * model.num_blocks,
         check_val_every_n_epoch=args.save_every_n_epochs,
         callbacks=[
             ModelCheckpoint(
@@ -64,7 +61,7 @@ def main(args):
         ],
         accumulate_grad_batches=args.accumulate_grad_batches,
         gradient_clip_val=1.0,
-        strategy=DDPStrategy(find_unused_parameters=args.model_type == "dblock")
+        strategy=DDPStrategy(find_unused_parameters=model.num_blocks > 1)
         if args.devices > 1
         else "auto",
         devices=args.devices,
@@ -72,7 +69,7 @@ def main(args):
         num_sanity_val_steps=0,
         # precision="bf16-mixed",
     )
-    if args.stage == "train":
+    if args.stage == Stage.TRAIN:
         trainer.fit(model, data, ckpt_path=args.ckpt_path)
         if data.test_key is not None:
             trainer.test(model, data.test_dataloader(), ckpt_path="best")
@@ -82,45 +79,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("stage", type=str, default="train", choices=["train", "test"])
-    parser.add_argument("data_name", type=str, default="cifar100")
-    parser.add_argument(
-        "--model_type", type=str, default="vit", choices=["vit", "dblock"]
-    )
-    parser.add_argument("--devices", type=int, default=1)
-    parser.add_argument("--num_epochs", type=int, default=500)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--add_rand_aug", action="store_true")
-    parser.add_argument("--eval_batch_size", type=int, default=None)
-    parser.add_argument("--save_every_n_epochs", type=int, default=5)
-    parser.add_argument("--accumulate_grad_batches", type=int, default=1)
-    parser.add_argument("--gradient_checkpointing", action="store_true")
-    parser.add_argument("--scheduler_type", type=str, default="constant_with_warmup")
-    parser.add_argument(
-        "--scheduler_specific_kwargs",
-        type=json.loads,
-        default=None,
-        help="specific kwargs for the scheduler",
-    )
-    parser.add_argument("--lr", type=float, default=0.001)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--optimizer", type=str, default="adamw")
-    parser.add_argument("--num_warmup_steps", type=int, default=0)
-    parser.add_argument("--deepspeed", action="store_true", help="use deepspeed")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--save_top_k", type=int, default=1)
-    parser.add_argument("--num_workers", type=int, default=8)
-    parser.add_argument("--ckpt_path", type=str, default=None)
-    parser.add_argument("--debug", action="store_true")
-    parser.add_argument(
-        "--postfix", type=str, default="", help="postfix for the experiment name"
-    )
-    # dblock
-    parser.add_argument("--num_blocks", type=int, default=3)
-    parser.add_argument("--gamma", type=float, default=0.05)
-    parser.add_argument("--num_inference_steps", type=int, default=None)
-    parser.add_argument("--cfg_scale", type=float, default=0.0)
-    parser.add_argument("--class_dropout_prob", type=float, default=0.0)
-    args = parser.parse_args()
-    main(args)
+    main(parse_args())
