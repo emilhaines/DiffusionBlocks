@@ -153,7 +153,9 @@ class ViTDBlockModel(ViTModel):
         self.layer_assignment: list[list[int]] = []
         self.register_buffer(
             "sigmas",
-            self.partition.inference_sigmas(self.num_inference_steps).to(self.device),
+            self.partition.get_discrete_sigmas(self.num_inference_steps).to(
+                self.device
+            ),
         )
 
     def hparams_dict(self) -> dict[str, Any]:
@@ -184,13 +186,13 @@ class ViTDBlockModel(ViTModel):
         )
 
     def get_sigmas(self, n_samples: int) -> torch.Tensor:
-        return self.partition.sample_sigmas(self.partition.sample_block(), n_samples)
+        return self.partition.get_sigmas(self.partition.sample_block_idx(), n_samples)
 
     def get_weights(self, sigmas: torch.Tensor) -> torch.Tensor:
         return edm_loss_weight(sigmas, self.sigma_data)
 
     def estimate_target_layer(self, sigma: torch.Tensor) -> int:
-        return self.partition.majority_block(sigma)
+        return self.partition.estimate_target_layer(sigma)
 
     def denoise(
         self,

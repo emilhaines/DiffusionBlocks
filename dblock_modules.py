@@ -78,50 +78,58 @@ class BlockPartition:
     noise: NoiseConfig = field(default_factory=NoiseConfig)
 
     @property
-    def boundaries(self) -> list[float]:
-        """Ascending σ boundaries, length num_blocks + 1."""
+    def block_sigmas(self) -> list[float]:
+        """Ascending block boundaries σ_0 < … < σ_B, length num_blocks + 1 (§3.3)."""
         n = self.noise
         return get_block_sigmas(
             self.num_blocks, n.sigma_min, n.sigma_max, n.p_mean, n.p_std
         )
 
-    def interval(self, block: int) -> tuple[float, float]:
-        """Training interval of `block`: its boundaries pushed out by γ·(log width) on each side, clamped (App. C)."""
-        b = self.boundaries
-        i = self.num_blocks - 1 - block
-        lo, hi = b[i], b[i + 1]
+    def get_block_sigma_range(self, block_idx: int) -> tuple[float, float]:
+        """Training σ range of a block: its boundaries pushed out by γ·(log width)
+        on each side, clamped to the global range (App. C)."""
+        block_sigmas = self.block_sigmas
+        i = self.num_blocks - 1 - block_idx
+        sigma_min_block, sigma_max_block = block_sigmas[i], block_sigmas[i + 1]
         if self.gamma > 0.0:
-            log_lo, log_hi = np.log(lo), np.log(hi)
-            log_range = log_hi - log_lo
-            lo = max(np.exp(log_lo - self.gamma * log_range), b[0])
-            hi = min(np.exp(log_hi + self.gamma * log_range), b[-1])
-        return lo, hi
+            log_sigma_min = np.log(sigma_min_block)
+            log_sigma_max = np.log(sigma_max_block)
+            log_range = log_sigma_max - log_sigma_min
+            sigma_min_block = max(
+                np.exp(log_sigma_min - self.gamma * log_range), block_sigmas[0]
+            )
+            sigma_max_block = min(
+                np.exp(log_sigma_max + self.gamma * log_range), block_sigmas[-1]
+            )
+        return sigma_min_block, sigma_max_block
 
-    def sample_block(self) -> int:
+    def sample_block_idx(self) -> int:
         """Uniform block per iteration (App. C)."""
         return self.num_blocks - 1 - random.choices(range(self.num_blocks), k=1)[0]
 
-    def sample_sigmas(self, block: int, n: int) -> torch.Tensor:
-        """n draws from the log-normal truncated to the block's interval, by inverse CDF (float64)."""
-        lo, hi = self.interval(block)
+    def get_sigmas(self, block_idx: int, n_samples: int) -> torch.Tensor:
+        """Log-normal σ truncated to the block's range, by inverse CDF (float64)."""
+        sigma_min_block, sigma_max_block = self.get_block_sigma_range(block_idx)
         p_mean, p_std = self.noise.p_mean, self.noise.p_std
-        cdf_lo = norm.cdf((np.log(lo) - p_mean) / p_std)
-        cdf_hi = norm.cdf((np.log(hi) - p_mean) / p_std)
-        rand = np.random.uniform(cdf_lo, cdf_hi, n)
+        cdf_min_block = norm.cdf((np.log(sigma_min_block) - p_mean) / p_std)
+        cdf_max_block = norm.cdf((np.log(sigma_max_block) - p_mean) / p_std)
+        rand = np.random.uniform(cdf_min_block, cdf_max_block, n_samples)
         return torch.from_numpy(np.exp(p_mean + p_std * norm.ppf(rand)))
 
-    def block_of(self, sigma: torch.Tensor) -> torch.Tensor:
+    def get_block_idx(self, sigma: torch.Tensor) -> torch.Tensor:
         """Owning block of each σ, using the un-expanded boundaries."""
-        b = torch.tensor(self.boundaries, device=sigma.device)
-        idx = torch.bucketize(sigma, b, right=True) - 1
-        return torch.clamp((self.num_blocks - 1) - idx, 0, self.num_blocks - 1).long()
+        block_sigmas = torch.tensor(self.block_sigmas, device=sigma.device)
+        block_idx = torch.bucketize(sigma, block_sigmas, right=True) - 1
+        block_idx = (self.num_blocks - 1) - block_idx
+        return torch.clamp(block_idx, 0, self.num_blocks - 1).long()
 
-    def majority_block(self, sigma: torch.Tensor) -> int:
+    def estimate_target_layer(self, sigma: torch.Tensor) -> int:
         """Most common owning block over a batch (the repo runs one block per batch)."""
-        values, counts = self.block_of(sigma).unique(return_counts=True)
+        values, counts = self.get_block_idx(sigma).unique(return_counts=True)
         return int(values[counts.argmax()].item())
 
-    def inference_sigmas(self, num_steps: int) -> torch.Tensor:
+    def get_discrete_sigmas(self, num_steps: int) -> torch.Tensor:
+        """Descending equi-probability inference schedule (App. H)."""
         n = self.noise
         return get_discrete_sigmas(
             num_steps,
