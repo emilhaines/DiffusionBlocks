@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 Google AI, Ross Wightman, The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,91 +14,51 @@
 """PyTorch ViT model."""
 
 # copied from https://github.com/huggingface/transformers/blob/v4.52.4/src/transformers/models/vit/modeling_vit.py
-from typing import Dict, List, Optional, Tuple, Union
+# The HF-derived code types Optional/Module attributes loosely; these pyright rules are relaxed for this file only.
+# pyright: reportOptionalMemberAccess=false, reportOptionalOperand=false, reportArgumentType=false
+# pyright: reportCallIssue=false, reportAttributeAccessIssue=false, reportPrivateImportUsage=false
 from dataclasses import dataclass
-import math
-import torch
-from torch import nn
-import torch.nn.functional as F
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from enum import StrEnum
+from typing import Any
 
+import torch
+import torch.nn.functional as F
+from torch import nn
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from transformers import ViTConfig as OrgViTConfig
 from transformers.modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPooling,
     ImageClassifierOutput,
 )
 from transformers.modeling_utils import PreTrainedModel
-from transformers.utils import logging, torch_int
-from transformers import ViTConfig as OrgViTConfig
+from transformers.models.vit.modeling_vit import (
+    ViTAttention,
+    ViTIntermediate,
+    ViTPatchEmbeddings,
+    ViTPooler,
+)
 from transformers.models.vit.modeling_vit import (
     ViTForImageClassification as OrgViTForImageClassification,
 )
-from transformers.models.vit.modeling_vit import (
-    ViTPatchEmbeddings,
-    ViTAttention,
-    ViTIntermediate,
-    ViTPooler,
-)
+from transformers.utils import logging, torch_int
 
+from dit import AdaLN, TimestepEmbedder, modulate
 
 logger = logging.get_logger(__name__)
 
 
-### DiT ###
-def modulate(x, shift, scale):
-    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
-
-
-class TimestepEmbedder(nn.Module):
-    def __init__(self, hidden_size, frequency_embedding_size=256):
-        super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(frequency_embedding_size, hidden_size),
-            nn.SiLU(),
-            nn.Linear(hidden_size, hidden_size),
-        )
-        self.frequency_embedding_size = frequency_embedding_size
-
-    @staticmethod
-    def timestep_embedding(t, dim, max_period=10000):
-        half = dim // 2
-        freqs = torch.exp(
-            -math.log(max_period) * torch.arange(start=0, end=half) / half
-        ).to(t.device)
-        args = t[:, None] * freqs[None]
-        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-        if dim % 2:
-            embedding = torch.cat(
-                [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
-            )
-        return embedding
-
-    def forward(self, t):
-        t_freq = self.timestep_embedding(t, self.frequency_embedding_size).to(
-            dtype=next(self.parameters()).dtype
-        )
-        t_emb = self.mlp(t_freq)
-        return t_emb
-
-
-class AdaLN(nn.Module):
-    def __init__(self, in_features, out_features, bias=True):
-        super().__init__()
-        self.silu = nn.SiLU()
-        self.linear = nn.Linear(in_features, out_features, bias)
-
-    def forward(self, x):
-        return self.silu(self.linear(x))
+class PoolingType(StrEnum):
+    CLS = "cls"
+    MEAN = "mean"
 
 
 ### ViT ###
 class ViTConfig(OrgViTConfig):
-    def __init__(self, pooling_type: str | None = None, **kwargs):
+    def __init__(self, pooling_type: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if pooling_type is None:
-            pooling_type = "cls"
-        assert pooling_type in ["cls", "mean"], f"Invalid pooling type: {pooling_type}"
-        self.pooling_type = pooling_type
+        # stored as a plain string so the HF config serializes; PoolingType validates it
+        self.pooling_type = PoolingType(pooling_type or PoolingType.CLS).value
 
 
 class ViTDiTConfig(ViTConfig):
@@ -107,8 +66,8 @@ class ViTDiTConfig(ViTConfig):
         self,
         time_conditioning: bool = False,
         cond_hidden_size: int | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.time_conditioning = time_conditioning
         if cond_hidden_size is None:
@@ -119,7 +78,7 @@ class ViTDiTConfig(ViTConfig):
 
 @dataclass
 class BaseModelOutputWithCond(BaseModelOutputWithPooling):
-    conditioning: Optional[torch.Tensor] = None
+    conditioning: torch.Tensor | None = None
 
 
 class ViTDiTEmbeddings(nn.Module):
@@ -201,13 +160,13 @@ class ViTDiTEmbeddings(nn.Module):
     def forward(
         self,
         pixel_values: torch.Tensor,
-        noisy_embeds: Optional[torch.Tensor] = None,
-        bool_masked_pos: Optional[torch.BoolTensor] = None,
+        noisy_embeds: torch.Tensor | None = None,
+        bool_masked_pos: torch.BoolTensor | None = None,
         interpolate_pos_encoding: bool = False,
     ) -> torch.Tensor:
         if interpolate_pos_encoding:
             raise NotImplementedError("Interpolate pos encoding is not supported")
-        batch_size, num_channels, height, width = pixel_values.shape
+        batch_size, _, height, width = pixel_values.shape
         embeddings = self.patch_embeddings(
             pixel_values, interpolate_pos_encoding=interpolate_pos_encoding
         )
@@ -279,10 +238,10 @@ class ViTDiTLayer(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        conditioning: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
+        conditioning: torch.Tensor | None = None,
+        head_mask: torch.Tensor | None = None,
         output_attentions: bool = False,
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor]:
         residual = hidden_states
         if self.time_conditioning:
             shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
@@ -337,13 +296,13 @@ class ViTDiTEncoder(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        conditioning: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
+        conditioning: torch.Tensor | None = None,
+        head_mask: torch.Tensor | None = None,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
-        layer_indices: Optional[List[int]] = None,
+        layer_indices: list[int] | None = None,
         return_dict: bool = True,
-    ) -> Union[tuple, BaseModelOutput]:
+    ) -> tuple | BaseModelOutput:
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
 
@@ -394,7 +353,7 @@ class ViTPreTrainedModel(PreTrainedModel):
     base_model_prefix = "vit"
     main_input_name = "pixel_values"
     supports_gradient_checkpointing = True
-    _no_split_modules = [
+    _no_split_modules = [  # noqa: RUF012 (HF PreTrainedModel API)
         "ViTEmbeddings",
         "LabelEmbedder",
         "TimestepEmbedder",
@@ -403,7 +362,7 @@ class ViTPreTrainedModel(PreTrainedModel):
     _supports_sdpa = True
     _supports_flash_attn_2 = True
 
-    def _init_weights(self, module: Union[nn.Linear, nn.Conv2d, nn.LayerNorm]) -> None:
+    def _init_weights(self, module: nn.Linear | nn.Conv2d | nn.LayerNorm) -> None:
         """Initialize the weights"""
         if isinstance(module, (nn.Linear, nn.Conv2d)):
             # Upcast the input in `fp32` and cast it back to desired `dtype` to avoid
@@ -438,14 +397,14 @@ class ViTPreTrainedModel(PreTrainedModel):
 class ViTForImageClassification(OrgViTForImageClassification):
     def forward(
         self,
-        pixel_values: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        interpolate_pos_encoding: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple, ImageClassifierOutput]:
+        pixel_values: torch.Tensor | None = None,
+        head_mask: torch.Tensor | None = None,
+        labels: torch.Tensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        interpolate_pos_encoding: bool | None = None,
+        return_dict: bool | None = None,
+    ) -> tuple | ImageClassifierOutput:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels for computing the image classification/regression loss. Indices should be in `[0, ...,
@@ -466,12 +425,11 @@ class ViTForImageClassification(OrgViTForImageClassification):
         )
 
         sequence_output = outputs[0]
-        if self.config.pooling_type == "cls":
-            sequence_output = sequence_output[:, 0, :]
-        elif self.config.pooling_type == "mean":
-            sequence_output = sequence_output[:, 1:].mean(dim=1)
-        else:
-            raise ValueError(f"Invalid pooling type: {self.config.pooling_type}")
+        match PoolingType(self.config.pooling_type):
+            case PoolingType.CLS:
+                sequence_output = sequence_output[:, 0, :]
+            case PoolingType.MEAN:
+                sequence_output = sequence_output[:, 1:].mean(dim=1)
         logits = self.classifier(sequence_output)
 
         loss = None
@@ -519,7 +477,7 @@ class ViTDiTModel(ViTPreTrainedModel):
         config: ViTDiTConfig,
         add_pooling_layer: bool = True,
         use_mask_token: bool = False,
-    ):
+    ) -> None:
         r"""
         add_pooling_layer (bool, *optional*, defaults to `True`):
             Whether to add a pooling layer
@@ -540,13 +498,13 @@ class ViTDiTModel(ViTPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    def get_input_embeddings(self):
+    def get_input_embeddings(self) -> nn.Module:
         if self.config.time_conditioning:
             return self.embeddings.label_embeddings
         else:
             return self.embeddings.patch_embeddings
 
-    def _prune_heads(self, heads_to_prune: Dict[int, List[int]]) -> None:
+    def _prune_heads(self, heads_to_prune: dict[int, list[int]]) -> None:
         """
         Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer} See base
         class PreTrainedModel
@@ -556,17 +514,17 @@ class ViTDiTModel(ViTPreTrainedModel):
 
     def forward(
         self,
-        pixel_values: Optional[torch.Tensor] = None,
-        timesteps: Optional[torch.Tensor] = None,
-        noisy_embeds: Optional[torch.Tensor] = None,
-        bool_masked_pos: Optional[torch.BoolTensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        interpolate_pos_encoding: Optional[bool] = None,
-        layer_indices: Optional[List[int]] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, BaseModelOutputWithPooling]:
+        pixel_values: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        noisy_embeds: torch.Tensor | None = None,
+        bool_masked_pos: torch.BoolTensor | None = None,
+        head_mask: torch.Tensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        interpolate_pos_encoding: bool | None = None,
+        layer_indices: list[int] | None = None,
+        return_dict: bool | None = None,
+    ) -> tuple | BaseModelOutputWithPooling:
         r"""
         bool_masked_pos (`torch.BoolTensor` of shape `(batch_size, num_patches)`, *optional*):
             Boolean masked positions. Indicates which patches are masked (1) and which aren't (0).
@@ -666,9 +624,7 @@ class ViTDiTForImageClassification(ViTPreTrainedModel):
         if self.time_conditioning:
             self._init_dit()
 
-    def _init_dit(
-        self,
-    ):
+    def _init_dit(self) -> None:
         # Initialize label embedding table:
         nn.init.normal_(self.vit.embeddings.label_embeddings.weight, std=0.02)
         # Initialize timestep embedding MLP:
@@ -684,27 +640,22 @@ class ViTDiTForImageClassification(ViTPreTrainedModel):
         nn.init.constant_(self.classifier.weight, 0)
         nn.init.constant_(self.classifier.bias, 0)
 
-    def get_input_embeddings(self):
+    def get_input_embeddings(self) -> nn.Module:
         return self.vit.get_input_embeddings()
 
     def forward_block(
         self,
-        layer_indices: List[int],
-        pixel_values: Optional[torch.Tensor] = None,
-        timesteps: Optional[torch.Tensor] = None,
-        noisy_embeds: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        interpolate_pos_encoding: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple, ImageClassifierOutput]:
-        r"""
-        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-            Labels for computing the image classification/regression loss. Indices should be in `[0, ...,
-            config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
-            `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
-        """
+        layer_indices: list[int],
+        pixel_values: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        noisy_embeds: torch.Tensor | None = None,
+        head_mask: torch.Tensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        interpolate_pos_encoding: bool | None = None,
+        return_dict: bool | None = None,
+    ) -> BaseModelOutputWithCond:
+        """Run only the layers in `layer_indices` (one DiffusionBlock); returns pooled hidden state + conditioning."""
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
@@ -720,12 +671,11 @@ class ViTDiTForImageClassification(ViTPreTrainedModel):
             return_dict=return_dict,
             layer_indices=layer_indices,
         )
-        if self.config.pooling_type == "cls":
-            outputs.last_hidden_state = outputs[0][:, 0, :]
-        elif self.config.pooling_type == "mean":
-            outputs.last_hidden_state = outputs[0][:, 1:, :].mean(dim=1)
-        else:
-            raise ValueError(f"Invalid pooling type: {self.config.pooling_type}")
+        match PoolingType(self.config.pooling_type):
+            case PoolingType.CLS:
+                outputs.last_hidden_state = outputs[0][:, 0, :]
+            case PoolingType.MEAN:
+                outputs.last_hidden_state = outputs[0][:, 1:, :].mean(dim=1)
 
         # outputs.last_hidden_state = outputs[0][:, 0, :]
 
@@ -733,7 +683,7 @@ class ViTDiTForImageClassification(ViTPreTrainedModel):
 
     def forward_output_embeddings(
         self, hidden_states: torch.Tensor, conditioning: torch.Tensor
-    ):
+    ) -> torch.Tensor:
         if self.config.time_conditioning:
             shift, scale = self.adaLN_modulation(conditioning).chunk(2, dim=1)
             hidden_states = modulate(hidden_states, shift, scale)
@@ -742,16 +692,16 @@ class ViTDiTForImageClassification(ViTPreTrainedModel):
 
     def forward(
         self,
-        pixel_values: Optional[torch.Tensor] = None,
-        timesteps: Optional[torch.Tensor] = None,
-        noisy_embeds: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        interpolate_pos_encoding: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple, ImageClassifierOutput]:
+        pixel_values: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        noisy_embeds: torch.Tensor | None = None,
+        head_mask: torch.Tensor | None = None,
+        labels: torch.Tensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        interpolate_pos_encoding: bool | None = None,
+        return_dict: bool | None = None,
+    ) -> tuple | ImageClassifierOutput:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels for computing the image classification/regression loss. Indices should be in `[0, ...,
@@ -820,7 +770,9 @@ class ViTDiTForImageClassification(ViTPreTrainedModel):
         )
 
 
-def load_vit(image_size: int, num_labels: int, is_dblock: bool = False, **kwargs):
+def load_vit(
+    image_size: int, num_labels: int, is_dblock: bool = False, **kwargs: Any
+) -> "ViTForImageClassification | ViTDiTForImageClassification":
     if image_size == 32:
         # CIFAR
         kwargs["patch_size"] = 4
@@ -840,16 +792,13 @@ def load_vit(image_size: int, num_labels: int, is_dblock: bool = False, **kwargs
     else:
         raise ValueError(f"Invalid image size: {image_size}")
     if is_dblock:
-        kwargs["time_conditioning"] = True
-        config_cls = ViTDiTConfig
-        model_cls = ViTDiTForImageClassification
-    else:
-        config_cls = ViTConfig
-        model_cls = ViTForImageClassification
-    config = config_cls(
-        image_size=image_size,
-        num_labels=num_labels,
-        **kwargs,
+        config = ViTDiTConfig(
+            time_conditioning=True,
+            image_size=image_size,
+            num_labels=num_labels,
+            **kwargs,
+        )
+        return ViTDiTForImageClassification(config)
+    return ViTForImageClassification(
+        ViTConfig(image_size=image_size, num_labels=num_labels, **kwargs)
     )
-    model = model_cls(config)
-    return model
