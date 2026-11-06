@@ -15,6 +15,7 @@ dependencies = [
     "hf-transfer>=0.1.9",
     "scipy>=1.16.2",
     "clean-fid>=0.1.35",
+    "structlog>=26.1.0",
 ]
 
 
@@ -44,7 +45,7 @@ pythonpath = ["."]
 addopts = "-q"
 
 [tool.pyright]
-include = ["main.py", "config.py", "model.py", "data.py", "dblock_modules.py", "dit.py", "vit.py", "evaluation.py", "tests"]
+include = ["main.py", "config.py", "model.py", "data.py", "dblock_modules.py", "dit.py", "vit.py", "evaluation.py", "scripts", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 venvPath = "."
