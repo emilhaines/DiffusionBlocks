@@ -16,6 +16,7 @@ from dblock_modules import (
     euler_sample,
 )
 from dit import DiT, DiTConfig
+from evaluation import CleanFID, build_fid_metrics
 from vit import ViTDiTForImageClassification, load_vit
 
 Batch = dict[str, torch.Tensor]
@@ -312,6 +313,7 @@ class DiTDBlockModel(DBlockModule):
         self.dit_config = dit_config or DiTConfig(
             image_size=self.image_size, num_classes=self.num_labels
         )
+        self.test_metrics = build_fid_metrics(cfg.data_name.value, self.image_size)
 
     def configure_model(self) -> None:
         self.model = DiT(self.dit_config)
@@ -371,6 +373,20 @@ class DiTDBlockModel(DBlockModule):
         loss, loss_dict = self.shared_step(batch, Split.TRAIN)
         self.log_dict(loss_dict, batch_size=batch["labels"].shape[0], prog_bar=True)
         return loss
+
+    def on_test_start(self) -> None:
+        # fetch the reference statistics now, so a download failure doesn't surface
+        # after the (long) sampling pass
+        for metric in self.test_metrics.values():
+            if isinstance(metric, CleanFID):
+                metric.load_reference()
+
+    def test_step(self, batch: Batch, batch_idx: int) -> None:
+        """Generate an image for each label and update FID, as the classification
+        models sample and update accuracy."""
+        labels = batch["labels"]
+        self.test_metrics.update(self.sample(labels))
+        self.log_dict(self.test_metrics, batch_size=labels.shape[0], prog_bar=True)
 
     @torch.no_grad()
     def sample(
