@@ -145,7 +145,6 @@ class CIFAR10DataModule(ImageDataModule):
         # like CIFAR-100: no validation split; the test stage generates one image per
         # test label (1,000 per class) for FID and the sample grid
         self.val_key = None
-        self.test_key = "test"
         self.drop_last_test = False  # FID uses every test label
         self.train_transforms = T.Compose(
             [T.Lambda(to_rgb), T.RandomHorizontalFlip(), *self.post_transforms]

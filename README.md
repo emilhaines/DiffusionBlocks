@@ -141,6 +141,17 @@ are not directly comparable to its Table 2. Two files are written to `logs/<run>
 (one row per class, fixed noise so models can be compared), and `results.json`, with the FIDs and the run's
 config and metadata.
 
+**Cost benchmark (B=1 vs B=3):** FLOPs per generated image, training memory for one optimizer step and
+sampling throughput, on randomly initialized models (no checkpoint needed):
+
+```bash
+uv run python -m scripts.benchmark --num_blocks 1 3
+```
+
+It logs progress, one result line per model and the gain of B=3 over B=1, and writes `logs/benchmark.json`. Training memory is
+counted from the tensors a step keeps alive (weights, gradients, AdamW state, activations); the MPS
+allocator's reading is reported next to it as a cross-check.
+
 ## Development
 
 ```bash

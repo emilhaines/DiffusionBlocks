@@ -1,28 +1,9 @@
-from typing import Any
-
 import numpy as np
 import torch
-from conftest import TINY
+from conftest import make_model
 from PIL import Image
 
-from config import DatasetName, ModelType, RunConfig, Stage
 from data import CIFAR10DataModule
-from model import DiTDBlockModel
-
-
-def make_model(**overrides: Any) -> DiTDBlockModel:
-    cfg = RunConfig(
-        Stage.TRAIN,
-        DatasetName.CIFAR10,
-        ModelType.DIT,
-        image_size=8,
-        num_labels=10,
-        num_inference_steps=6,
-        **overrides,
-    )
-    model = DiTDBlockModel(cfg, TINY)
-    model.configure_model()
-    return model
 
 
 def test_training_step_updates_only_the_sampled_block() -> None:
