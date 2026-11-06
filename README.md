@@ -107,7 +107,8 @@ DiffusionBlocks; both use the same code path. As for classification, DiffusionBl
 ```bash
 uv run main.py train cifar10 --model_type dit --num_blocks 1 \
     --batch_size 64 --accumulate_grad_batches 8 --lr 1e-4 --num_epochs 100 \
-    --cfg_scale 2.0 --class_dropout_prob 0.1 --num_inference_steps 50
+    --cfg_scale 2.0 --class_dropout_prob 0.1 --num_inference_steps 50 \
+    --eval_batch_size 100
 ```
 
 **DiffusionBlocks (B=3):**
@@ -115,12 +116,30 @@ uv run main.py train cifar10 --model_type dit --num_blocks 1 \
 ```bash
 uv run main.py train cifar10 --model_type dit --num_blocks 3 --gamma 0.05 \
     --batch_size 64 --accumulate_grad_batches 8 --lr 1e-4 --num_epochs 100 \
-    --cfg_scale 2.0 --class_dropout_prob 0.1 --num_inference_steps 50
+    --cfg_scale 2.0 --class_dropout_prob 0.1 --num_inference_steps 50 \
+    --eval_batch_size 100
 ```
 
 The settings follow the paper (App. E.2): batch 512 (here 64 × 8 accumulation; a micro-batch of 128 does not fit B=1 on a 19 GB Mac), AdamW with lr 1e-4,
 100 epochs, CFG scale 2.0 with 10% label dropout, and 50 Euler steps. Sampling uses
 `DiTDBlockModel.sample(labels)`.
+
+**Evaluation (FID and sample grid):** as for classification, the test stage runs after training, or
+on a checkpoint with:
+
+```bash
+uv run main.py test cifar10 --model_type dit --num_blocks 3 --cfg_scale 2.0 \
+    --num_inference_steps 50 --eval_batch_size 100 --ckpt_path logs/path-to-last.ckpt
+```
+
+It generates one image per CIFAR-10 test label (10k, 1,000 per class) and logs FID computed with
+[clean-fid](https://github.com/GaParmar/clean-fid)'s pipeline against its precomputed CIFAR-10 statistics:
+`test/fid_train` in `legacy_tensorflow` mode (closest to the ADM suite the paper uses for train FID; its
+Inception runs on the CPU, as it fails on MPS) and `test/fid_test` in `clean` mode, as in the paper.
+These FIDs use 10k samples and a single evaluation, not the paper's 50k samples and minimum of 3, so they
+are not directly comparable to its Table 2. Two files are written to `logs/<run>/`: `grid.png`, a 10×10 grid
+(one row per class, fixed noise so models can be compared), and `results.json`, with the FIDs and the run's
+config and metadata.
 
 ## Development
 

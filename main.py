@@ -1,6 +1,7 @@
 import datetime
 import os
 from dataclasses import replace
+from pathlib import Path
 
 import lightning as L
 import torch
@@ -8,13 +9,28 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.strategies import DDPStrategy
 
-from config import RunConfig, Stage, parse_args
-from data import load_data
+from config import ModelType, RunConfig, Stage, parse_args
+from data import ImageDataModule, load_data
+from evaluation import SampleGrid, SaveResults
 from model import load_model
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
+
+
+def test_callbacks(
+    args: RunConfig, data: ImageDataModule, logdir: str
+) -> list[L.Callback]:
+    """Evaluation run in the test stage, beyond what the model logs itself."""
+    match args.model_type:
+        case ModelType.DIT:
+            return [
+                SampleGrid(Path(logdir) / "grid.png", data.num_labels),
+                SaveResults(Path(logdir) / "results.json", args.to_dict()),
+            ]
+        case _:
+            return []
 
 
 def main(args: RunConfig) -> None:
@@ -58,6 +74,7 @@ def main(args: RunConfig) -> None:
                 save_last=True,
             ),
             LearningRateMonitor(logging_interval="step"),
+            *test_callbacks(args, data, logdir),
         ],
         accumulate_grad_batches=args.accumulate_grad_batches,
         gradient_clip_val=1.0,

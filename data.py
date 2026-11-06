@@ -72,6 +72,7 @@ class ImageDataModule(L.LightningDataModule):
         self.train_key: str = "train"
         self.val_key: str | None = "validation"
         self.test_key: str | None = "test"
+        self.drop_last_test = True
 
     def prepare_data(self) -> None:
         load_dataset(self.data_name, num_proc=(os.cpu_count() or 2) // 2)
@@ -126,7 +127,7 @@ class ImageDataModule(L.LightningDataModule):
             batch_size=self.eval_batch_size,
             num_workers=self.num_workers,
             pin_memory=True,
-            drop_last=True,
+            drop_last=self.drop_last_test,
             shuffle=False,
         )
 
@@ -141,10 +142,11 @@ class CIFAR10DataModule(ImageDataModule):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        # like CIFAR-100, no validation split; the test stage (sample grid, FID) is
-        # not implemented yet, so main.py skips it
+        # like CIFAR-100: no validation split; the test stage generates one image per
+        # test label (1,000 per class) for FID and the sample grid
         self.val_key = None
-        self.test_key = None
+        self.test_key = "test"
+        self.drop_last_test = False  # FID uses every test label
         self.train_transforms = T.Compose(
             [T.Lambda(to_rgb), T.RandomHorizontalFlip(), *self.post_transforms]
         )
