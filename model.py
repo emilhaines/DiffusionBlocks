@@ -163,6 +163,7 @@ class DBlockModule(BaseModule):
         self.register_buffer(
             "sigmas", self.partition.get_discrete_sigmas(self.num_inference_steps)
         )
+        self.step_block_idx: int | None = None
 
     @property
     def num_inference_steps(self) -> int:
@@ -183,9 +184,20 @@ class DBlockModule(BaseModule):
             "class_dropout_prob": self.class_dropout_prob,
         }
 
+    def on_train_batch_start(self, batch: Batch, batch_idx: int) -> None:
+        """One block per iteration (paper App. E). Under gradient accumulation an
+        iteration (optimizer step) spans several micro-batches, so the block is drawn
+        at the first one and kept for the rest."""
+        if batch_idx % self.trainer.accumulate_grad_batches == 0:
+            self.step_block_idx = self.partition.sample_block_idx()
+
     def get_sigmas(self, n_samples: int) -> torch.Tensor:
-        """One block per batch (uniform), σ from its truncated log-normal (App. C)."""
-        return self.partition.get_sigmas(self.partition.sample_block_idx(), n_samples)
+        """σ from the step's block's truncated log-normal (App. C). Outside a Trainer
+        (no optimizer step), a block is drawn uniformly per call."""
+        block_idx = self.step_block_idx
+        if block_idx is None:
+            block_idx = self.partition.sample_block_idx()
+        return self.partition.get_sigmas(block_idx, n_samples)
 
     def get_weights(self, sigmas: torch.Tensor) -> torch.Tensor:
         return edm_loss_weight(sigmas, self.sigma_data)
