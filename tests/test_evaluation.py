@@ -8,8 +8,8 @@ import pytest
 import torch
 import torchmetrics
 from cleanfid.utils import ResizeDataset
+from conftest import make_model
 from PIL import Image
-from test_dit_dblock_model import make_model
 from torch.utils.data import DataLoader, Dataset
 
 from evaluation import (

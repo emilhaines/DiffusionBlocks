@@ -86,11 +86,10 @@ class CleanFID(Metric):
         """Fetch the reference statistics now rather than at the first `compute`."""
         self.reference_stats  # noqa: B018 (evaluated for its caching side effect)
 
-    def inception_device(self, images: torch.device | torch.Tensor) -> torch.device:
-        device = images if isinstance(images, torch.device) else images.device
-        if device.type == "mps" and not self.mode.runs_on_mps:
+    def inception_device(self, images: torch.Tensor) -> torch.device:
+        if images.device.type == "mps" and not self.mode.runs_on_mps:
             return torch.device("cpu")
-        return device
+        return images.device
 
     def preprocess(self, images: torch.Tensor) -> torch.Tensor:
         """[−1, 1] images → clean-fid's Inception input, as its ResizeDataset builds it:
