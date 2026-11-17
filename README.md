@@ -134,26 +134,17 @@ uv run main.py test cifar10 --model_type dit --num_blocks 3 --cfg_scale 2.0 \
 
 It generates one image per CIFAR-10 test label (10k, 1,000 per class) and logs FID computed with
 [clean-fid](https://github.com/GaParmar/clean-fid)'s pipeline against its precomputed CIFAR-10 statistics:
-`test/fid_train` in `legacy_tensorflow` mode (closest to the ADM suite the paper uses for train FID; its
-Inception runs on the CPU, as it fails on MPS) and `test/fid_test` in `clean` mode, as in the paper.
-These FIDs use 10k samples per evaluation, not the paper's 50k, so they are biased upward by a few points
-and are not directly comparable to its Table 2. For variance, evaluate with `--seed 0`, `1` and `2` and report
-the mean ± std and the minimum (the paper reports the minimum of 3). Two kinds of file are written to
-`logs/<run>/`: `grid.png`, a 10×10 grid (one row per class, fixed noise so models can be compared), and
-`results_seed<k>.json`, one per evaluation seed, with the FIDs and the run's config and metadata.
+`test/fid_train` in `legacy_tensorflow` mode and `test/fid_test` in `clean` mode, as in the paper.
 
 **Heun sampler:** `--sampler heun` replaces the 50 Euler steps with Heun's second-order method,
 which evaluates the network twice per step. With `--num_inference_steps 25` it uses 49 network
-evaluations against Euler's 50. Both evaluations of a step must run the same block, so no step may cross
-a block boundary. The equi-probability schedule contains the boundaries as points when its number of
-steps is a multiple of the number of blocks (25 points: 8 steps per block for B=3), and the state at a
-boundary passes unchanged to the next block. Other step counts are rejected. Results are written to
-`grid_heun.png` and `results_heun_seed<k>.json`, next to the Euler ones:
+evaluations against Euler's 50:
 
 ```bash
 uv run main.py test cifar10 --model_type dit --num_blocks 3 --cfg_scale 2.0 --sampler heun \
     --num_inference_steps 25 --eval_batch_size 100 --ckpt_path logs/path-to-last.ckpt
 ```
+`test/fid_train` in `legacy_tensorflow` mode and `test/fid_test` in `clean` mode, as in the paper.
 
 **Cost benchmark (B=1 vs B=3):** FLOPs per generated image, training memory for one optimizer step and
 sampling throughput, on randomly initialized models (no checkpoint needed):
