@@ -1,6 +1,4 @@
 """DiT building blocks (Peebles & Xie, 2023), shared by the classification ViT (vit.py) and the generation DiT.
-
-Pure torch: no transformers dependency.
 """
 
 import math
