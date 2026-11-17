@@ -1,5 +1,4 @@
-"""DiT building blocks (Peebles & Xie, 2023), shared by the classification ViT (vit.py) and the generation DiT.
-"""
+"""DiT building blocks (Peebles & Xie, 2023), shared by the classification ViT (vit.py) and the generation DiT."""
 
 import math
 from dataclasses import dataclass
