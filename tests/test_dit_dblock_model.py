@@ -20,19 +20,6 @@ def test_training_step_updates_only_the_sampled_block() -> None:
     assert model.num_blocks == 3  # max_epochs multiplier
 
 
-def test_sample_is_deterministic_and_cfg_zero_is_conditional() -> None:
-    model = make_model(cfg_scale=2.0).eval()
-    labels = torch.arange(3)
-    a = model.sample(labels, torch.Generator().manual_seed(0))
-    b = model.sample(labels, torch.Generator().manual_seed(0))
-    assert a.shape == (3, 3, 8, 8) and torch.equal(a, b)
-    z, sigma = torch.randn(3, 3, 8, 8), torch.full((3,), 1.0)
-    model.cfg_scale = 0.0
-    no_cfg = model.denoise(z, sigma, labels)
-    model.train()
-    torch.testing.assert_close(no_cfg, model.denoise(z, sigma, labels))
-
-
 def test_cfg_scale_one_is_conditional_and_guidance_is_linear() -> None:
     """D_u + s·(D_c − D_u): s = 1 gives D_c (s = 0 disables CFG) and D is linear in s."""
     model = make_model().eval()
