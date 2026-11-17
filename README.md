@@ -136,6 +136,16 @@ It generates one image per CIFAR-10 test label (10k, 1,000 per class) and logs F
 [clean-fid](https://github.com/GaParmar/clean-fid)'s pipeline against its precomputed CIFAR-10 statistics:
 `test/fid_train` in `legacy_tensorflow` mode and `test/fid_test` in `clean` mode, as in the paper.
 
+**Heun sampler:** `--sampler heun` replaces the 50 Euler steps with Heun's second-order method,
+which evaluates the network twice per step. With `--num_inference_steps 25` it uses 49 network
+evaluations against Euler's 50:
+
+```bash
+uv run main.py test cifar10 --model_type dit --num_blocks 3 --cfg_scale 2.0 --sampler heun \
+    --num_inference_steps 25 --eval_batch_size 100 --ckpt_path logs/path-to-last.ckpt
+```
+`test/fid_train` in `legacy_tensorflow` mode and `test/fid_test` in `clean` mode, as in the paper.
+
 **Cost benchmark (B=1 vs B=3):** FLOPs per generated image, training memory for one optimizer step and
 sampling throughput, on randomly initialized models (no checkpoint needed):
 

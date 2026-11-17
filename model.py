@@ -8,15 +8,11 @@ import torchmetrics
 from torch import nn
 from transformers.optimization import get_scheduler
 
-from config import ModelType, RunConfig
-from dblock_modules import (
-    BlockPartition,
-    EDMCoefficients,
-    edm_loss_weight,
-    euler_sample,
-)
+from config import ModelType, RunConfig, SamplerType
+from dblock_modules import BlockPartition, EDMCoefficients, edm_loss_weight
 from dit import DiT, DiTConfig
 from evaluation import CleanFID, build_fid_metrics
+from samplers import EulerSampler, HeunSampler, Sampler, sample
 from vit import ViTDiTForImageClassification, load_vit
 
 Batch = dict[str, torch.Tensor]
@@ -326,6 +322,20 @@ class DiTDBlockModel(DBlockModule):
             image_size=self.image_size, num_classes=self.num_labels
         )
         self.test_metrics = build_fid_metrics(cfg.data_name.value, self.image_size)
+        # The equi-probability inference schedule (App. H), rebuilt from the config
+        # rather than stored, so checkpoints load whether or not they contain it.
+        self.register_buffer(
+            "sigmas",
+            self.partition.get_discrete_sigmas(self.num_inference_steps),
+            persistent=False,
+        )
+        self.sampler = SAMPLERS[cfg.sampler]
+        # blocks looked up once (no per-step sync); raises if the sampler can't hand off
+        self.block_idxs = self.sampler.get_block_idxs(self.partition, self.sigmas.cpu())
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Some checkpoints store the schedule; it is rebuilt instead, so drop it."""
+        checkpoint["state_dict"].pop("sigmas", None)
 
     def configure_model(self) -> None:
         self.model = DiT(self.dit_config)
@@ -370,7 +380,7 @@ class DiTDBlockModel(DBlockModule):
     def shared_step(
         self, batch: Batch, step: Split = Split.TRAIN
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """EDM loss (paper Eq. 6) on one block, chosen uniformly for this batch."""
+        """EDM loss (paper Eq. 6) on the block drawn for this optimizer step."""
         x0, labels = batch["pixel_values"], batch["labels"]
         sigmas = self.get_sigmas(x0.shape[0])
         block_idx = self.estimate_target_layer(sigmas)
@@ -409,14 +419,18 @@ class DiTDBlockModel(DBlockModule):
         shape = (labels.shape[0], c.in_channels, c.image_size, c.image_size)
         z = torch.randn(shape, generator=generator).to(self.device)
         z = z * torch.sqrt(1.0 + self.sigmas[0] ** 2)  # as in the repo
-        # the schedule is fixed, so look up each step's block once (no per-step sync)
-        block_idxs = self.partition.get_block_idx(self.sigmas.cpu()).tolist()
-        return euler_sample(
-            lambda z, sigma, i: self.denoise(z, sigma, labels, block_idxs[i]),
+        return sample(
+            self.sampler,
+            lambda z, sigma, i: self.denoise(z, sigma, labels, self.block_idxs[i]),
             self.sigmas,
             z,
         ).clamp(-1, 1)
 
+
+SAMPLERS: dict[SamplerType, Sampler] = {
+    SamplerType.EULER: EulerSampler(),
+    SamplerType.HEUN: HeunSampler(),
+}
 
 MODELS: dict[ModelType, type[BaseModule]] = {
     ModelType.VIT: ViTModel,
